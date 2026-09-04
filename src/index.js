@@ -49,7 +49,9 @@ if (!GEMINI_API_KEY) {
   );
 }
 
-const ai = GEMINI_API_KEY ? new GoogleGenAI({ apiKey: GEMINI_API_KEY }) : null;
+const ai = GEMINI_API_KEY
+  ? new GoogleGenAI({ apiKey: GEMINI_API_KEY })
+  : null;
 
 const client = new Client({
   intents: [
