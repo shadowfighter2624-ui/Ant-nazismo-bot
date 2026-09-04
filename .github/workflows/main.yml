@@ -26,5 +26,5 @@ jobs:
       - name: Instalar dependências
         run: npm install
 
-      - name: Verificar sintaxe
-        run: node --check src/index.js
+      - name: Iniciar bot
+  run: node src/index.js
