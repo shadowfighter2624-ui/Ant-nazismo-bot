@@ -303,8 +303,13 @@ ${context || "[nenhum]"}
 
 function getImageAttachments(message) {
   return [...message.attachments.values()].filter((attachment) => {
-    const type = attachment.contentType || "";
-    return type.startsWith("image/");
+    const type = (attachment.contentType || "").toLowerCase();
+    const name = (attachment.name || "").toLowerCase();
+
+    return (
+      type.startsWith("image/") ||
+      /\.(jpg|jpeg|png|gif|webp|bmp|avif)$/i.test(name)
+    );
   });
 }
 
@@ -335,22 +340,68 @@ async function analyzeImageWithGemini(attachment) {
       "image/jpeg";
 
     const prompt = `
-Voce e o filtro visual de um servidor Discord com REGRA EXTREMAMENTE ESTRITA.
+Voce e o filtro visual antinazismo de um servidor Discord.
+A regra de moderacao e EXTREMAMENTE ESTRITA.
 
-Analise a imagem e responda SOMENTE JSON valido:
-{"block":true} ou {"block":false}
+Analise a imagem cuidadosamente e responda SOMENTE com JSON valido:
 
-Marque block=true se a imagem:
-- retrata Hitler ou uma representacao claramente identificavel dele;
-- apresenta propaganda, glorificacao ou celebracao do nazismo/nacional-socialismo;
-- apresenta saudacao nazista ou simbolos nazistas usados nesse contexto;
-- apresenta material visual de propaganda nazista;
-- contem texto na imagem que claramente referencia ou promove o nazismo/Hitler.
+{"block":true}
 
-Nao bloqueie uma imagem apenas por ser historica, militar ou politica se nao houver
-relacao clara com o tema proibido.
+ou
 
-Nao descreva a imagem. Retorne apenas o JSON.
+{"block":false}
+
+BLOQUEIE (block=true) se QUALQUER uma destas condicoes for verdadeira:
+
+1. A imagem mostra Adolf Hitler, mesmo que:
+   - esteja sozinho;
+   - esteja em uma foto historica;
+   - nao exista nenhum simbolo nazista visivel;
+   - esteja usando roupas comuns;
+   - esteja apenas fazendo um retrato normal;
+   - apareca parcialmente, desde que seja claramente identificavel.
+
+2. A imagem mostra QUALQUER pessoa fazendo uma saudacao nazista ou um gesto
+claramente identificavel como saudacao nazista, mesmo que:
+   - a pessoa nao seja Hitler;
+   - esteja sozinha;
+   - esteja em uma fotografia, desenho, meme ou montagem;
+   - nao existam outros simbolos nazistas na imagem.
+
+3. A imagem mostra QUALQUER simbolo, emblema, bandeira, marca, insígnia ou
+representacao visual claramente associada ao nazismo/nacional-socialismo.
+
+4. A imagem mostra propaganda nazista, material de propaganda,
+cartazes, bandeiras, uniformes, emblemas ou composicoes que promovam,
+glorifiquem ou celebrem o nazismo.
+
+5. A imagem mostra uma pessoa claramente caracterizada ou representada
+como Hitler, incluindo imitacao visual claramente intencional de sua
+aparencia ou personagem.
+
+6. A imagem mostra uma pessoa usando uma combinacao de gesto, simbolos,
+roupas, texto, cenografia ou outros elementos que deixe clara uma
+intencao nazista ou uma imitacao/apologia nazista.
+
+7. A imagem contem texto, desenho, meme ou montagem que claramente
+promova, celebre, glorifique ou represente o nazismo ou Hitler.
+
+IMPORTANTE:
+- Nao exija que Hitler esteja acompanhado de simbolos nazistas.
+- Uma imagem de Hitler sozinha ja deve resultar em block=true.
+- Uma saudacao nazista feita por qualquer pessoa ja deve resultar em block=true.
+- Um simbolo nazista claramente identificavel ja deve resultar em block=true.
+- Considere tambem desenhos, ilustracoes, memes e montagens.
+- Nao bloqueie simplesmente porque uma pessoa levantou o braco em uma
+situacao comum. Deve existir evidencia visual clara de saudacao nazista
+ou contexto nazista.
+- Nao invente conexoes que nao estejam presentes na imagem.
+- Retorne SOMENTE o JSON. Nao explique a decisao.
+
+RESPONDA AGORA SOMENTE:
+{"block":true}
+ou
+{"block":false}
 `;
 
     const result = await ai.models.generateContent({
@@ -377,14 +428,18 @@ Nao descreva a imagem. Retorne apenas o JSON.
       block: parsed?.block === true,
       skipped: false,
     };
-  } catch (error) {
-    console.error(
-      `Gemini imagem falhou (${attachment.name || attachment.id}):`,
-      error?.message || error
-    );
-    return { block: false, skipped: true, reason: "erro na analise" };
+   } catch (error) {
+  console.error(
+    `Gemini imagem falhou (${attachment.name || attachment.id}):`,
+    error?.message || error
+  );
+
+  return {
+    block: false,
+    skipped: true,
+    reason: "erro na analise",
+  };
   }
-}
 
 async function moderateMessage(message) {
   if (!message.guildId) return;
@@ -427,9 +482,17 @@ async function moderateMessage(message) {
   const images = getImageAttachments(message);
 
   for (const image of images) {
-    const result = await analyzeImageWithGemini(image);
+  console.log(
+    `Imagem encontrada: ${image.name || image.id} (${image.contentType || "tipo desconhecido"})`
+  );
 
-    if (result.block) {
+  const result = await analyzeImageWithGemini(image);
+
+  console.log(
+    `Resultado da imagem ${image.name || image.id}: block=${result.block}, skipped=${result.skipped}`
+  );
+
+  if (result.block) {
       const deleted = await safeDelete(message);
       await sendLog(
         message,
