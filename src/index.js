@@ -36,7 +36,7 @@ const MAX_IMAGE_BYTES = Math.max(
   100000,
   Number.parseInt(process.env.MAX_IMAGE_BYTES || "8000000", 10)
 );
-const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.6-flash";
 
 if (!DISCORD_TOKEN) {
   console.error("ERRO: DISCORD_TOKEN nao foi configurado.");
