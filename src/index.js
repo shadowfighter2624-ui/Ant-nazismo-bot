@@ -438,9 +438,9 @@ ou
     block: false,
     skipped: true,
     reason: "erro na analise",
-  };
+    };
   }
-
+  }
 async function moderateMessage(message) {
   if (!message.guildId) return;
   if (message.author?.bot) return;
