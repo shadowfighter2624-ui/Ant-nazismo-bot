@@ -65,6 +65,8 @@ const client = new Client({
 // Historico curto em memoria: userId -> [{content, timestamp}]
 const userHistory = new Map();
 
+const CACHE_IMAGENS = new Map();
+const MENSAGENS_PROCESSANDO = new Set();
 // Palavras e expressoes de alta confianca.
 // O normalizador abaixo tambem remove acentos, pontuacao e caracteres invisiveis.
 const HARD_BLOCK_PATTERNS = [
@@ -219,15 +221,43 @@ function canDelete(message) {
 }
 
 async function safeDelete(message) {
-  if (!message.deletable || !canDelete(message)) {
+  const deletable = message.deletable;
+  const manageMessages = canDelete(message);
+
+  console.log(
+    `Pode apagar? deletable=${deletable}, manage_messages=${manageMessages}`
+  );
+
+  if (!deletable || !manageMessages) {
+    console.error(
+      `Nao foi possivel apagar: deletable=${deletable}, manage_messages=${manageMessages}`
+    );
     return false;
   }
 
   try {
     await message.delete();
+
+    console.log(
+      `Mensagem apagada com sucesso: ${message.id}`
+    );
+
     return true;
   } catch (error) {
-    console.error("Falha ao apagar mensagem:", error?.message || error);
+    // Discord retorna "Unknown Message" quando a mensagem
+    // já foi apagada antes da nossa tentativa.
+    if (error?.code === 10008) {
+      console.log(
+        `Mensagem ${message.id} ja nao existe. Considerando como apagada.`
+      );
+      return true;
+    }
+
+    console.error(
+      "Falha ao apagar mensagem:",
+      error?.message || error
+    );
+
     return false;
   }
 }
