@@ -267,6 +267,7 @@ async function safeDelete(message) {
 
     return false;
   }
+async function sendLog(message, reason, deleted) {
 
   if (!LOG_CHANNEL_ID) return;
 
@@ -525,7 +526,7 @@ ou
       cacheHit: false,
     };
   }
-}
+async function moderateMessage(message) {
   if (!message.guildId) return;
   if (message.author?.bot) return;
   if (!shouldModerateChannel(message)) return;
