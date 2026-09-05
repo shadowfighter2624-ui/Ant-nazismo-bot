@@ -1,4 +1,4 @@
-name: Testar bot
+name: Deploy bot para Quaxly
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  deploy:
     runs-on: ubuntu-latest
 
     env:
@@ -15,16 +15,58 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
 
     steps:
-      - name: Baixar código
+      - name: Baixar arquivos do GitHub
         uses: actions/checkout@v4
 
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
+      - name: Preparar npm
+        run: |
+          echo "cache=.npm" > .npmrc
+
+      - name: Criar pasta de cache no Quaxly
+        env:
+          QUAXLY_HOST: ${{ secrets.QUAXLY_HOST }}
+          QUAXLY_PORT: ${{ secrets.QUAXLY_PORT }}
+          QUAXLY_USER: ${{ secrets.QUAXLY_USER }}
+          QUAXLY_PASSWORD: ${{ secrets.QUAXLY_PASSWORD }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq sshpass
+          sshpass -p "$QUAXLY_PASSWORD" sftp -o StrictHostKeyChecking=no -P "$QUAXLY_PORT" "$QUAXLY_USER@$QUAXLY_HOST" <<'EOF'
+          -mkdir .npm
+          -mkdir .npm/_cacache
+          -mkdir .npm/_logs
+          bye
+          EOF
+
+      - name: Enviar package.json
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.6
         with:
-          node-version: 20
+          username: ${{ secrets.QUAXLY_USER }}
+          server: ${{ secrets.QUAXLY_HOST }}
+          port: ${{ secrets.QUAXLY_PORT }}
+          password: ${{ secrets.QUAXLY_PASSWORD }}
+          local_path: './package.json'
+          remote_path: '/'
+          sftp_only: true
 
-      - name: Instalar dependências
-        run: npm install
+      - name: Enviar npmrc
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.6
+        with:
+          username: ${{ secrets.QUAXLY_USER }}
+          server: ${{ secrets.QUAXLY_HOST }}
+          port: ${{ secrets.QUAXLY_PORT }}
+          password: ${{ secrets.QUAXLY_PASSWORD }}
+          local_path: './.npmrc'
+          remote_path: '/'
+          sftp_only: true
 
-      - name: Iniciar bot
-        run: node src/index.js
+      - name: Enviar src
+        uses: wlixcc/SFTP-Deploy-Action@v1.2.6
+        with:
+          username: ${{ secrets.QUAXLY_USER }}
+          server: ${{ secrets.QUAXLY_HOST }}
+          port: ${{ secrets.QUAXLY_PORT }}
+          password: ${{ secrets.QUAXLY_PASSWORD }}
+          local_path: './src/*'
+          remote_path: '/src'
+          sftp_only: true
