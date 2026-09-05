@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { createHash } from "node:crypto";
 import {
   Client,
   GatewayIntentBits,
@@ -225,12 +226,19 @@ async function safeDelete(message) {
   const manageMessages = canDelete(message);
 
   console.log(
-    `Pode apagar? deletable=${deletable}, manage_messages=${manageMessages}`
+    `Diagnostico apagar mensagem: deletable=${deletable}, manageMessages=${manageMessages}, messageId=${message.id}`
   );
 
-  if (!deletable || !manageMessages) {
+  if (!deletable) {
     console.error(
-      `Nao foi possivel apagar: deletable=${deletable}, manage_messages=${manageMessages}`
+      `NAO FOI POSSIVEL APAGAR: message.deletable=false, messageId=${message.id}`
+    );
+    return false;
+  }
+
+  if (!manageMessages) {
+    console.error(
+      `NAO FOI POSSIVEL APAGAR: bot sem permissao Manage Messages, messageId=${message.id}`
     );
     return false;
   }
@@ -244,12 +252,11 @@ async function safeDelete(message) {
 
     return true;
   } catch (error) {
-    // Discord retorna "Unknown Message" quando a mensagem
-    // já foi apagada antes da nossa tentativa.
     if (error?.code === 10008) {
       console.log(
         `Mensagem ${message.id} ja nao existe. Considerando como apagada.`
       );
+
       return true;
     }
 
@@ -260,9 +267,7 @@ async function safeDelete(message) {
 
     return false;
   }
-}
 
-async function sendLog(message, reason, deleted) {
   if (!LOG_CHANNEL_ID) return;
 
   try {
@@ -344,24 +349,63 @@ function getImageAttachments(message) {
 }
 
 async function analyzeImageWithGemini(attachment) {
-  if (!ai) return { block: false, skipped: true };
+  if (!ai) {
+    return {
+      block: false,
+      skipped: true,
+      reason: "Gemini não configurado",
+    };
+  }
 
   if (attachment.size && attachment.size > MAX_IMAGE_BYTES) {
-    // Nao bloqueamos automaticamente apenas por tamanho.
-    return { block: false, skipped: true, reason: "imagem grande demais" };
+    return {
+      block: false,
+      skipped: true,
+      reason: "imagem grande demais",
+    };
   }
 
   try {
     const response = await fetch(attachment.url);
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status} ao baixar imagem`);
+      throw new Error(
+        `HTTP ${response.status} ao baixar imagem`
+      );
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
 
     if (buffer.length > MAX_IMAGE_BYTES) {
-      return { block: false, skipped: true, reason: "imagem grande demais" };
+      return {
+        block: false,
+        skipped: true,
+        reason: "imagem grande demais",
+      };
+    }
+
+    // Identifica a imagem pelo conteúdo real dela.
+    // Assim, a mesma imagem pode ser reconhecida mesmo
+    // que o Discord gere uma URL diferente.
+    const imageHash = createHash("sha256")
+      .update(buffer)
+      .digest("hex");
+
+    // Se essa imagem já foi analisada anteriormente,
+    // não precisamos chamar o Gemini novamente.
+    if (CACHE_IMAGES.has(imageHash)) {
+      const cached = CACHE_IMAGES.get(imageHash);
+
+      console.log(
+        `Cache da imagem encontrado: block=${cached.block}`
+      );
+
+      return {
+        block: cached.block,
+        skipped: false,
+        cacheHit: true,
+      };
     }
 
     const mimeType =
@@ -370,7 +414,7 @@ async function analyzeImageWithGemini(attachment) {
       "image/jpeg";
 
     const prompt = `
-Voce e o filtro visual antinazismo de um servidor Discord.
+Você e o filtro visual antinazismo de um servidor Discord.
 A regra de moderacao e EXTREMAMENTE ESTRITA.
 
 Analise a imagem cuidadosamente e responda SOMENTE com JSON valido:
@@ -391,46 +435,38 @@ BLOQUEIE (block=true) se QUALQUER uma destas condicoes for verdadeira:
    - esteja apenas fazendo um retrato normal;
    - apareca parcialmente, desde que seja claramente identificavel.
 
-2. A imagem mostra QUALQUER pessoa fazendo uma saudacao nazista ou um gesto
-claramente identificavel como saudacao nazista, mesmo que:
+2. A imagem mostra QUALQUER pessoa fazendo uma saudacao nazista ou um gesto claramente identificavel como saudacao nazista, mesmo que:
    - a pessoa nao seja Hitler;
    - esteja sozinha;
    - esteja em uma fotografia, desenho, meme ou montagem;
    - nao existam outros simbolos nazistas na imagem.
 
-3. A imagem mostra QUALQUER simbolo, emblema, bandeira, marca, insígnia ou
-representacao visual claramente associada ao nazismo/nacional-socialismo.
+3. A imagem mostra QUALQUER simbolo, emblema, bandeira, marca, insignia ou representacao visual claramente associada ao nazismo/nacional-socialismo.
 
-4. A imagem mostra propaganda nazista, material de propaganda,
-cartazes, bandeiras, uniformes, emblemas ou composicoes que promovam,
-glorifiquem ou celebrem o nazismo.
+4. A imagem mostra propaganda nazista, material de propaganda, cartazes, bandeiras, uniformes, emblemas ou composicoes que promovam, glorifiquem ou celebrem o nazismo.
 
-5. A imagem mostra uma pessoa claramente caracterizada ou representada
-como Hitler, incluindo imitacao visual claramente intencional de sua
-aparencia ou personagem.
+5. A imagem mostra uma pessoa claramente caracterizada ou representada como Hitler, incluindo imitacao visual claramente intencional de sua aparencia ou personagem.
 
-6. A imagem mostra uma pessoa usando uma combinacao de gesto, simbolos,
-roupas, texto, cenografia ou outros elementos que deixe clara uma
-intencao nazista ou uma imitacao/apologia nazista.
+6. A imagem mostra uma pessoa usando uma combinacao de gesto, simbolos, roupas, texto, cenografia ou outros elementos que deixe clara uma intencao nazista ou uma imitacao/apologia nazista.
 
-7. A imagem contem texto, desenho, meme ou montagem que claramente
-promova, celebre, glorifique ou represente o nazismo ou Hitler.
+7. A imagem contem texto, desenho, meme ou montagem que claramente promova, celebre, glorifique ou represente o nazismo ou Hitler.
 
 IMPORTANTE:
 - Nao exija que Hitler esteja acompanhado de simbolos nazistas.
-- Uma imagem de Hitler sozinha ja deve resultar em block=true.
-- Uma saudacao nazista feita por qualquer pessoa ja deve resultar em block=true.
-- Um simbolo nazista claramente identificavel ja deve resultar em block=true.
+- Uma imagem de Hitler sozinha deve resultar em block=true.
+- Uma saudacao nazista feita por qualquer pessoa deve resultar em block=true.
+- Um simbolo nazista claramente identificavel deve resultar em block=true.
 - Considere tambem desenhos, ilustracoes, memes e montagens.
-- Nao bloqueie simplesmente porque uma pessoa levantou o braco em uma
-situacao comum. Deve existir evidencia visual clara de saudacao nazista
-ou contexto nazista.
+- Nao bloqueie simplesmente porque uma pessoa levantou o braco em uma situacao comum. Deve existir contexto visual claro de saudacao nazista.
 - Nao invente conexoes que nao estejam presentes na imagem.
 - Retorne SOMENTE o JSON. Nao explique a decisao.
 
 RESPONDA AGORA SOMENTE:
+
 {"block":true}
+
 ou
+
 {"block":false}
 `;
 
@@ -454,24 +490,42 @@ ou
     const raw = result.text?.trim() || "";
     const parsed = JSON.parse(raw);
 
-    return {
+    const decision = {
       block: parsed?.block === true,
-      skipped: false,
     };
-   } catch (error) {
-  console.error(
-    `Gemini imagem falhou (${attachment.name || attachment.id}):`,
-    error?.message || error
-  );
 
-  return {
-    block: false,
-    skipped: true,
-    reason: "erro na analise",
+    // Guarda somente analises concluidas com sucesso.
+    // Se o Gemini falhar, nao colocamos nada no cache.
+    CACHE_IMAGES.set(imageHash, decision);
+
+    // Limita o cache para evitar crescimento infinito de memoria.
+    if (CACHE_IMAGES.size > 5000) {
+      const oldestKey = CACHE_IMAGES.keys().next().value;
+
+      if (oldestKey) {
+        CACHE_IMAGES.delete(oldestKey);
+      }
+    }
+
+    return {
+      ...decision,
+      skipped: false,
+      cacheHit: false,
+    };
+  } catch (error) {
+    console.error(
+      `Gemini imagem falhou (${attachment.name || attachment.id}):`,
+      error?.message || error
+    );
+
+    return {
+      block: false,
+      skipped: true,
+      reason: "erro na analise",
+      cacheHit: false,
     };
   }
-  }
-async function moderateMessage(message) {
+}
   if (!message.guildId) return;
   if (message.author?.bot) return;
   if (!shouldModerateChannel(message)) return;
@@ -519,8 +573,8 @@ async function moderateMessage(message) {
   const result = await analyzeImageWithGemini(image);
 
   console.log(
-    `Resultado da imagem ${image.name || image.id}: block=${result.block}, skipped=${result.skipped}`
-  );
+  `Resultado da imagem ${image.name || image.id}: block=${result.block}, skipped=${result.skipped}, cacheHit=${result.cacheHit || false}`
+);
 
   if (result.block) {
       const deleted = await safeDelete(message);
